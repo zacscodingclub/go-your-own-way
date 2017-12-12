@@ -25,6 +25,14 @@ type Option struct {
 	Chapter string `json:"arc"`
 }
 
+type handler struct {
+	s      Story
+	t      *template.Template
+	pathFn func(r *http.Request) string
+}
+
+type HandlerOption func(h *handler)
+
 var defaultTemplate = `
 <!DOCTYPE html>
 	<html lang="en">
@@ -95,28 +103,40 @@ func init() {
 	tpl = template.Must(template.New("").Parse(defaultTemplate))
 }
 
-func NewHandler(s Story, t *template.Template) http.Handler {
-	if t == nil {
-		t = tpl
+func WithTemplate(t *template.Template) HandlerOption {
+	return func(h *handler) {
+		h.t = t
 	}
-	return handler{s, t}
 }
 
-type handler struct {
-	s Story
-	t *template.Template
+func WithPathFunc(fn func(r *http.Request) string) HandlerOption {
+	return func(h *handler) {
+		h.pathFn = fn
+	}
 }
 
-func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func defaultPathFn(r *http.Request) string {
 	path := strings.TrimSpace(r.URL.Path)
 	if path == "" || path == "/" {
 		path = "/intro"
 	}
 
-	path = path[1:]
+	return path[1:]
+}
 
+func NewHandler(s Story, opts ...HandlerOption) http.Handler {
+	h := handler{s, tpl, defaultPathFn}
+	for _, opt := range opts {
+		opt(&h)
+	}
+
+	return h
+}
+
+func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	path := h.pathFn(r)
 	if chapter, ok := h.s[path]; ok {
-		err := tpl.Execute(w, chapter)
+		err := h.t.Execute(w, chapter)
 		if err != nil {
 			log.Printf("%v", err)
 			http.Error(w, "Something went wrong...", http.StatusInternalServerError)
